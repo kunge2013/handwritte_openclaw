@@ -197,7 +197,8 @@
   </div>
 
   <script>
-    const API_BASE = 'http://localhost:3000';
+    // 自动使用当前访问的端口
+    const API_BASE = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
     const SESSION_ID = 'web-chat-' + Date.now();
 
     let chatContainer = document.getElementById('chat-container');

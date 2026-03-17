@@ -1,0 +1,196 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.3.8",
+    "lastTouchedAt": "2026-03-16T05:53:36.831Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-03-12T04:25:33.332Z",
+    "lastRunVersion": "2026.3.8",
+    "lastRunCommand": "onboard",
+    "lastRunMode": "local"
+  },
+  "models": {
+    "providers": {
+      "volcengine-plan": {
+        "baseUrl": "https://www.fucheers.top/v1/chat/completions",
+        "apiKey": "sk-Gj7XGwc1zmqWCpSObruYAWH0I0Gk0TlGUxF3liFeDGh8kKGx",
+        "api": "openai-completions",
+        "models": [
+          
+          {
+            "id": "claude-haiku-4-5-20251001",
+            "name": "claude-haiku-4-5-20251001",
+            "input": [
+              "text"
+            ],
+            "contextWindow": 200000,
+            "maxTokens": 128000
+          },
+          {
+            "id": "kimi-k2.5",
+            "name": "kimi-k2.5",
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 256000,
+            "maxTokens": 32000
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "volcengine-plan/claude-haiku-4-5-20251001"
+      },
+      "models": {
+        "volcengine-plan/claude-haiku-4-5-20251001": {},
+        "volcengine-plan/doubao-seed-2.0-code": {},
+        "volcengine-plan/doubao-seed-2.0-pro": {},
+        "volcengine-plan/doubao-seed-2.0-lite": {},
+        "volcengine-plan/doubao-seed-code": {},
+        "volcengine-plan/glm-4.7": {},
+        "volcengine-plan/deepseek-v3.2": {},
+        "volcengine-plan/kimi-k2.5": {}
+      },
+      "workspace": "C:\\Users\\ThinkPad\\.openclaw\\workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "volcengine-plan/claude-haiku-4-5-20251001",
+        "tools": {
+          "profile": "minimal"
+        }
+      },
+      {
+        "id": "coding",
+        "name": "coding",
+        "workspace": "C:\\Users\\ThinkPad\\.openclaw\\workspace-coding",
+        "agentDir": "C:\\Users\\ThinkPad\\.openclaw\\agents\\coding\\agent"
+      }
+    ]
+  },
+  "tools": {
+    "profile": "coding"
+  },
+  "bindings": [
+    {
+      "agentId": "main",
+      "match": {
+        "channel": "feishu",
+        "accountId": "default"
+      }
+    },
+    {
+      "agentId": "coding",
+      "match": {
+        "channel": "feishu",
+        "accountId": "coding"
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {
+          "enabled": true
+        },
+        "command-logger": {
+          "enabled": true
+        },
+        "bootstrap-extra-files": {
+          "enabled": true
+        },
+        "boot-md": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "connectionMode": "websocket",
+      "domain": "feishu",
+      "accounts": {
+        "default": {
+          "appId": "cli_a9f47ae148389bd9",
+          "appSecret": "6LowX8DlnYSNEoeyaJakrhTiqDLNjCG2",
+          "botName": "主助手",
+          "requireMention": true
+        },
+        "coding": {
+          "appId": "cli_a93d2e12ccb85bd8",
+          "appSecret": "RPEhXdBKMdI4OIJkdlPJqg7XciU2ESII",
+          "botName": "coding",
+          "requireMention": false
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "lan",
+    "controlUi": {
+      "allowedOrigins": [
+        "http://localhost:18789",
+        "http://127.0.0.1:18789"
+      ]
+    },
+    "auth": {
+      "mode": "token",
+      "token": "fd11614386d578f9945ae79019fec6b6a05b75ce3260c685"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send"
+      ]
+    }
+  },
+  "plugins": {
+    "load": {
+      "paths": [
+        "D:\\npm\\prefix\\node_modules\\openclaw\\extensions\\feishu"
+      ]
+    },
+    "entries": {
+      "feishu": {
+        "enabled": true
+      }
+    }
+  }
+}
