@@ -25,7 +25,9 @@ import { ConfigManager, EnvLoader, ConfigPathResolver } from '../config/config.j
 import type { Config } from '../config/types.js';
 import { SecretsManager } from '../secrets/secrets.js';
 import { AgentManager } from '../agents/agent.js';
+import { createOpenClawCodingTools } from '../agents/pi-tools.js';
 import type { AgentConfig } from '../agents/types.js';
+import type { Tool } from '../agents/types.js';
 import { ModelManager } from '../models/model-manager.js';
 import { GatewayManager } from '../gateway/server.js';
 import { ChannelManager, ChannelFactory } from '../channels/channel.js';
@@ -222,6 +224,13 @@ export class CLIApplication {
 
     // 创建 Agent
     const agent = await this.agentManager.createAgent(agentConfig);
+
+    // 创建并注册所有核心工具（包括我们刚添加的 get_datetime）
+    const allTools = createOpenClawCodingTools();
+    for (const tool of allTools) {
+      agent.registerTool(tool);
+    }
+    console.log(`[CLI] 已注册 ${allTools.length} 个核心工具`);
 
     // 监听 agent-message 事件并打印日志
     this.agentManager.on('agent-message', (data) => {

@@ -89,12 +89,15 @@ export class Agent extends EventEmitter {
   /**
    * 处理用户消息
    *
-   * 流程:
+   * 标准 ReAct 循环流程:
    * 1. 将消息添加到历史记录
    * 2. 准备上下文（消息历史 + 系统提示）
-   * 3. 发送到 LLM
-   * 4. 处理响应（可能包含工具调用）
-   * 5. 返回结果
+   * 3. 调用 LLM 获取响应
+   * 4. 如果有工具调用：
+   *    a. 依次执行每个工具
+   *    b. 将工具结果添加到历史作为 TOOL 消息
+   *    c. 回到步骤 3 继续让 LLM 处理工具结果
+   * 5. 如果没有工具调用，返回最终结果
    */
   async processMessage(message: Message): Promise<Message> {
     if (!this.connected) {
@@ -103,22 +106,104 @@ export class Agent extends EventEmitter {
 
     console.log(`[Agent] 处理消息: ${message.content.substring(0, 50)}...`);
 
-    // 添加到消息历史
+    // 添加用户消息到历史
     this.messageHistory.push(message);
 
-    // 准备上下文
-    const context = this.buildContext();
-    
-    // 模拟 LLM 调用
-    const response = await this.callLLM(context, message);
+    let finalResponse: Message | null = null;
+    const MAX_TOOL_ROUNDS = 5; // 限制最大工具调用轮次，防止无限循环
 
-    // 添加响应到历史
-    this.messageHistory.push(response);
+    // ReAct 工具调用循环
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // 调用 LLM
+      const context = this.buildContext();
+      const response = await this.callLLM(context, message);
 
-    // 触发消息事件
-    this.emit('message', { agentId: this.config.id, message: response });
+      // 如果没有工具调用，这就是最终响应
+      if (!response.toolCalls || response.toolCalls.length === 0) {
+        finalResponse = response;
+        this.messageHistory.push(finalResponse);
+        this.emit('message', { agentId: this.config.id, message: finalResponse });
+        return finalResponse;
+      }
 
-    return response;
+      console.log(`[Agent] 检测到 ${response.toolCalls.length} 个工具调用，开始执行`);
+
+      // 有工具调用，依次执行
+      for (const toolCall of response.toolCalls) {
+        // 执行工具并获取结果
+        const toolResult = await this.executeToolCall(toolCall);
+
+        // 创建工具响应消息，添加到历史
+        const toolResponseMessage: Message = {
+          id: `msg_${Date.now()}`,
+          role: MessageRole.TOOL,
+          content: JSON.stringify(toolResult),
+          timestamp: Date.now(),
+          toolResponse: {
+            callId: toolCall.callId,
+            content: JSON.stringify(toolResult),
+            success: toolResult.success,
+          },
+        };
+
+        this.messageHistory.push(response); // 先添加 LLM 的工具调用响应
+        this.messageHistory.push(toolResponseMessage); // 再添加工具执行结果
+
+        console.log(`[Agent] 工具 ${toolCall.name} 执行完成，success=${toolResult.success}`);
+      }
+
+      // 继续下一轮循环，让 LLM 基于工具结果继续回答
+    }
+
+    // 如果达到最大轮次还没有得到最终回答
+    finalResponse = {
+      id: `msg_${Date.now()}`,
+      role: MessageRole.ASSISTANT,
+      content: '<final>已达到最大工具调用轮次限制，停止处理。</final>',
+      timestamp: Date.now(),
+    };
+
+    this.messageHistory.push(finalResponse);
+    this.emit('message', { agentId: this.config.id, message: finalResponse });
+    return finalResponse;
+  }
+
+  /**
+   * 执行单个工具调用
+   * 根据工具名称找到工具实例，调用 handler，返回标准化结果
+   */
+  private async executeToolCall(toolCall: {
+    name: string;
+    arguments: Record<string, unknown>;
+    callId: string;
+  }): Promise<{ success: boolean; result?: unknown; error?: string }> {
+    // 查找工具
+    const tool = this.tools.get(toolCall.name);
+    if (!tool) {
+      console.error(`[Agent] 工具未找到: ${toolCall.name}`);
+      return {
+        success: false,
+        error: `Tool not found: ${toolCall.name}`,
+      };
+    }
+
+    try {
+      // 执行工具 handler
+      console.log(`[Agent] 执行工具: ${toolCall.name}`);
+      const result = await tool.handler(toolCall.arguments);
+      return {
+        success: true,
+        result,
+      };
+    } catch (error) {
+      // 捕获执行错误
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Agent] 工具执行失败: ${toolCall.name}, error: ${errorMessage}`);
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
   }
 
   /**

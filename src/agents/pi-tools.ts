@@ -231,7 +231,157 @@ function createOpenClawTools(): Tool[] {
     },
   });
 
+  // ========== 新增：获取当前日期时间工具 ==========
+  tools.push({
+    name: 'get_datetime',
+    description:
+      'Get the current date and time with timezone support. ' +
+      'Returns structured information including timestamp, formatted string, ' +
+      'and date components (year, month, day, hour, minute, second, weekday).',
+    handler: async (args: Record<string, unknown>) => {
+      // 获取参数，允许用户自定义时区
+      const requestedTimezone = args.timezone as string | undefined;
+      const requestedFormat = args.format as string | undefined;
+
+      const now = new Date();
+
+      // 如果用户指定了时区，使用指定时区计算本地时间组件
+      const timezone = requestedTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+      // 获取指定时区下的日期时间组件
+      const local = getLocalDateTimeComponents(now, timezone);
+
+      // 根据请求的格式格式化输出
+      let formatted: string;
+      switch (requestedFormat) {
+        case 'date':
+          formatted = formatDateOnly(now, timezone);
+          break;
+        case 'time':
+          formatted = formatTimeOnly(now, timezone);
+          break;
+        case 'iso':
+          formatted = now.toISOString();
+          break;
+        case 'full':
+        default:
+          formatted = formatFullDateTime(now, timezone);
+          break;
+      }
+
+      // 返回结构化结果
+      return {
+        ok: true,
+        timestamp: now.getTime(),           // JavaScript 毫秒时间戳
+        unixTimestamp: Math.floor(now.getTime() / 1000), // Unix 秒时间戳
+        iso: now.toISOString(),             // ISO 8601 格式（总是 UTC）
+        timezone,                            // 使用的时区
+        formatted,                            // 格式化后的可读字符串
+        local,                               // 本地时区下的各个组件
+      };
+    },
+    parameters: {
+      type: 'object',
+      properties: {
+        timezone: {
+          type: 'string',
+          description:
+            'Timezone identifier (e.g. "Asia/Shanghai", "America/New_York"). ' +
+            'Defaults to system timezone if not specified.',
+        },
+        format: {
+          type: 'string',
+          enum: ['full', 'date', 'time', 'iso'],
+          description:
+            'Output format: full="datetime with weekday", date="date only", time="time only", iso="ISO 8601 format". Defaults to "full".',
+        },
+      },
+    },
+  });
+
   return tools;
+}
+
+/**
+ * 获取指定时区下的日期时间组件
+ * 使用 Intl.DateTimeFormat 提取各个部分
+ */
+function getLocalDateTimeComponents(date: Date, timeZone: string) {
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    weekday: 'long',
+    timeZone,
+  };
+
+  const formatter = new Intl.DateTimeFormat('en-US', formatOptions);
+  const parts = formatter.formatToParts(date);
+
+  const components: Record<string, number | string> = {};
+
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      if (part.type === 'weekday') {
+        components[part.type] = part.value;
+      } else {
+        components[part.type] = Number.parseInt(part.value, 10);
+      }
+    }
+  }
+
+  return {
+    year: components.year as number,
+    month: components.month as number,
+    day: components.day as number,
+    hour: components.hour as number,
+    minute: components.minute as number,
+    second: components.second as number,
+    weekday: components.weekday as string,
+  };
+}
+
+/**
+ * 格式化完整日期时间（带星期）
+ */
+function formatFullDateTime(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone,
+  }).format(date);
+}
+
+/**
+ * 仅格式化日期
+ */
+function formatDateOnly(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone,
+  }).format(date);
+}
+
+/**
+ * 仅格式化时间
+ */
+function formatTimeOnly(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone,
+  }).format(date);
 }
 
 /**
