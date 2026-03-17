@@ -22,7 +22,9 @@
       "Bash(curl -X POST \"https://ark.cn-beijing.volces.com/api/coding\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{\"\"model\"\": \"\"minimax-m2.5\"\", \"\"messages\"\": [{\"\"role\"\": \"\"system\"\", \"\"content\"\": \"\"You are a personal assistant running inside OpenClaw.\"\"}, {\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"2121\"\"}], \"\"temperature\"\": 0.7, \"\"max_tokens\"\": 128000, \"\"stream\"\": false, \"\"tools\"\": [{\"\"type\"\": \"\"function\"\", \"\"function\"\": {\"\"name\"\": \"\"ping\"\", \"\"description\"\": \"\"检查代理状态\"\", \"\"parameters\"\": {}}}, {\"\"type\"\": \"\"function\"\", \"\"function\"\": {\"\"name\"\": \"\"get_context\"\", \"\"description\"\": \"\"获取当前对话上下文\"\", \"\"parameters\"\": {}}}], \"\"tool_choice\"\": \"\"auto\"\"}')",
       "Bash(curl -v -X POST \"https://ark.cn-beijing.volces.com/api/v3/chat/completions\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{\"\"model\"\": \"\"minimax-m2.5\"\", \"\"messages\"\": [{\"\"role\"\": \"\"system\"\", \"\"content\"\": \"\"Hello\"\"}, {\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"Hi\"\"}], \"\"temperature\"\": 0.7, \"\"max_tokens\"\": 1000, \"\"stream\"\": false}')",
       "Bash(chmod +x /home/fk/workspace/github/handwritte_openclaw/skills/github-helper/scripts/create-issue.sh)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
