@@ -167,6 +167,143 @@
     .clear-btn:hover {
       background: rgba(255,255,255,0.1);
     }
+
+    /* LLM 推理过程样式 */
+    .llm-inference {
+      align-self: flex-start;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1rem;
+      margin: 0.25rem 0;
+      max-width: 90%;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .llm-inference.start {
+      color: #495057;
+    }
+
+    .llm-inference.end {
+      background: #e8f4f8;
+      border-color: #99cfe7;
+      color: #0c5460;
+    }
+
+    .llm-header {
+      font-weight: 600;
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .llm-info {
+      font-size: 0.75rem;
+      color: #6c757d;
+      margin-bottom: 0.5rem;
+    }
+
+    .llm-content {
+      font-family: monospace;
+      font-size: 0.75rem;
+      background: rgba(0,0,0,0.05);
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      word-break: break-all;
+      margin-top: 0.25rem;
+      max-height: 250px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    /* 工具调用决策（LLM 决定调用工具） */
+    .tool-call-decision {
+      align-self: flex-start;
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      margin: 0.25rem 0;
+      max-width: 90%;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .tool-call-decision .decision-title {
+      font-weight: 600;
+      font-size: 0.8rem;
+      color: #856404;
+      margin-bottom: 0.25rem;
+    }
+
+    .tool-call-decision .args {
+      font-family: monospace;
+      font-size: 0.7rem;
+      background: rgba(0,0,0,0.05);
+      padding: 0.25rem;
+      border-radius: 0.25rem;
+      word-break: break-all;
+      margin-top: 0.25rem;
+    }
+
+    /* 工具执行状态样式 */
+    .tool-execution {
+      align-self: flex-start;
+      background: #f0f8ff;
+      border: 1px solid #b3d9ff;
+      border-radius: 0.75rem;
+      padding: 0.75rem 1rem;
+      margin: 0.25rem 0;
+      max-width: 90%;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .tool-execution.start {
+      color: #666;
+    }
+
+    .tool-execution.end.success {
+      background: #f0f9f0;
+      border-color: #a8e6a8;
+      color: #2e7d32;
+    }
+
+    .tool-execution.end.error {
+      background: #fff5f5;
+      border-color: #ffcdd2;
+      color: #c62828;
+    }
+
+    .tool-name {
+      font-weight: 600;
+      font-size: 0.875rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .tool-args {
+      font-family: monospace;
+      font-size: 0.75rem;
+      background: rgba(0,0,0,0.05);
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      word-break: break-all;
+      margin-top: 0.25rem;
+    }
+
+    .tool-result {
+      font-family: monospace;
+      font-size: 0.75rem;
+      background: rgba(0,0,0,0.05);
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      word-break: break-all;
+      margin-top: 0.25rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
   </style>
 </head>
 <body>
@@ -244,6 +381,10 @@
       }
     }
 
+    // 存储当前元素引用，用于更新
+    let currentToolElement = null;
+    let currentLlmElement = null;
+
     async function sendMessage() {
       const content = messageInput.value.trim();
       if (!content) return;
@@ -251,41 +392,197 @@
       addMessage('user', content);
       messageInput.value = '';
       sendBtn.disabled = true;
-
       showTypingIndicator();
 
-      try {
-        const response = await fetch(`${API_BASE}/api/message`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId: SESSION_ID,
-            channelId: 'webchat',
-            message: {
-              content: content,
-              type: 'text',
-            },
-          }),
-        });
+      // 使用 SSE 流式接收处理事件
+      const eventSource = new EventSource(`${API_BASE}/api/message?sessionId=${SESSION_ID}&channelId=webchat&content=${encodeURIComponent(content)}`);
 
+      // LLM 开始推理
+      eventSource.addEventListener('llm_start', (event) => {
+        const data = JSON.parse(event.data);
         removeTypingIndicator();
+        currentLlmElement = addLlmInferenceStart(data);
+      });
 
-        if (response.ok) {
-          const data = await response.json();
-          addMessage('assistant', data.content);
-        } else {
-          addMessage('assistant', '[错误] 服务器响应错误');
+      // LLM 推理完成
+      eventSource.addEventListener('llm_end', (event) => {
+        const data = JSON.parse(event.data);
+        if (currentLlmElement) {
+          updateLlmInferenceEnd(currentLlmElement, data);
+          currentLlmElement = null;
         }
-      } catch (error) {
+      });
+
+      // LLM 决定调用工具
+      eventSource.addEventListener('tool_call', (event) => {
+        const data = JSON.parse(event.data);
+        addToolCallDecision(data);
+      });
+
+      // 工具开始执行
+      eventSource.addEventListener('tool_start', (event) => {
+        const data = JSON.parse(event.data);
+        currentToolElement = addToolExecutionStart(data);
+      });
+
+      // 工具执行完成
+      eventSource.addEventListener('tool_end', (event) => {
+        const data = JSON.parse(event.data);
+        if (currentToolElement) {
+          updateToolExecutionEnd(currentToolElement, data);
+          currentToolElement = null;
+        }
+      });
+
+      // 最终回答完成
+      eventSource.addEventListener('final', (event) => {
+        const data = JSON.parse(event.data);
         removeTypingIndicator();
-        addMessage('assistant', '[错误] 无法连接到服务器，请确保网关已启动');
-        console.error(error);
+        addMessage('assistant', data.content);
+        if (data.data?.totalDurationMs) {
+          console.log(`[Web] 完整处理耗时: ${data.data.totalDurationMs}ms`);
+        }
+        eventSource.close();
+        sendBtn.disabled = false;
+        messageInput.focus();
+      });
+
+      eventSource.addEventListener('error', (event) => {
+        removeTypingIndicator();
+        let errorMsg = '[错误] 未知错误';
+        if (event.data) {
+          const data = JSON.parse(event.data);
+          errorMsg = `[错误] ${data.error}`;
+        }
+        addMessage('assistant', errorMsg);
+        eventSource.close();
+        sendBtn.disabled = false;
+        messageInput.focus();
+      });
+    }
+
+    /**
+     * 添加工具开始执行的显示
+     */
+    function addToolExecutionStart(data) {
+      const div = document.createElement('div');
+      div.className = 'tool-execution start';
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'tool-name';
+      nameDiv.textContent = `⚙️ 正在执行工具: ${data.name}`;
+      div.appendChild(nameDiv);
+
+      if (Object.keys(data.arguments).length > 0) {
+        const argsDiv = document.createElement('div');
+        argsDiv.className = 'tool-args';
+        argsDiv.textContent = `参数: ${JSON.stringify(data.arguments, null, 2)}`;
+        div.appendChild(argsDiv);
       }
 
-      sendBtn.disabled = false;
-      messageInput.focus();
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      return div;
+    }
+
+    /**
+     * 更新工具执行完成显示
+     */
+    function updateToolExecutionEnd(element, data) {
+      element.classList.remove('start');
+      element.classList.add('end');
+      element.classList.add(data.result.success ? 'success' : 'error');
+
+      if (data.result.success && data.result.result) {
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'tool-result';
+        resultDiv.textContent = `结果: ${JSON.stringify(data.result.result, null, 2)}`;
+        element.appendChild(resultDiv);
+      } else if (!data.result.success && data.result.error) {
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'tool-result';
+        resultDiv.textContent = `错误: ${data.result.error}`;
+        element.appendChild(resultDiv);
+      }
+
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    /**
+     * 添加 LLM 推理开始显示
+     */
+    function addLlmInferenceStart(data) {
+      const div = document.createElement('div');
+      div.className = 'llm-inference start';
+
+      const headerDiv = document.createElement('div');
+      headerDiv.className = 'llm-header';
+      headerDiv.textContent = `🤖 第 ${data.round} 轮: LLM 推理中...`;
+      div.appendChild(headerDiv);
+
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'llm-info';
+      infoDiv.textContent = `模型: ${data.model}`;
+      div.appendChild(infoDiv);
+
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      return div;
+    }
+
+    /**
+     * 更新 LLM 推理完成显示
+     */
+    function updateLlmInferenceEnd(element, data) {
+      element.classList.remove('start');
+      element.classList.add('end');
+
+      // 更新 header
+      const header = element.querySelector('.llm-header');
+      header.textContent = `✅ 第 ${data.round} 轮: LLM 推理完成 (${data.durationMs}ms)`;
+
+      // 如果有工具调用，更新信息
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'llm-info';
+      if (data.hasToolCalls) {
+        infoDiv.textContent = `检测到 ${data.toolCalls.length} 个工具调用，准备执行...`;
+      } else {
+        infoDiv.textContent = '无工具调用，直接返回最终回答';
+      }
+      element.appendChild(infoDiv);
+
+      // 如果 LLM 返回了内容（非工具调用部分），显示出来
+      if (data.content && data.content.trim()) {
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'llm-content';
+        contentDiv.textContent = `输出: ${data.content}`;
+        element.appendChild(contentDiv);
+      }
+
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    /**
+     * 添加 LLM 工具调用决策显示
+     */
+    function addToolCallDecision(data) {
+      const div = document.createElement('div');
+      div.className = 'tool-call-decision';
+
+      const titleDiv = document.createElement('div');
+      titleDiv.className = 'decision-title';
+      titleDiv.textContent = `🎯 LLM 决策: 调用工具 "${data.name}"`;
+      div.appendChild(titleDiv);
+
+      if (Object.keys(data.arguments).length > 0) {
+        const argsDiv = document.createElement('div');
+        argsDiv.className = 'args';
+        argsDiv.textContent = JSON.stringify(data.arguments, null, 2);
+        div.appendChild(argsDiv);
+      }
+
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
     function handleKeydown(event) {

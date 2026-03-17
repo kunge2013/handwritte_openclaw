@@ -139,12 +139,16 @@ export class GatewayServer extends EventEmitter {
       return;
     }
 
+    // 去掉查询字符串，只比较路径
+    const requestUrl = req.url || '/';
+    const cleanPath = requestUrl.split('?')[0];
+
     // 路由处理
-    if (url === '/health' && method === 'GET') {
+    if (cleanPath === '/health' && method === 'GET') {
       this.handleHealthCheck(res);
-    } else if (url === '/api/message' && method === 'POST') {
+    } else if (cleanPath === '/api/message' && (method === 'POST' || method === 'GET')) {
       this.handleMessage(req, res);
-    } else if (url === '/api/sessions' && method === 'GET') {
+    } else if (cleanPath === '/api/sessions' && method === 'GET') {
       this.handleGetSessions(res);
     } else if ((url === '/' || url === '/index.html') && method === 'GET') {
       this.serveStaticFile(path.join(__dirname, '../../ui/index.html'), 'text/html', res);
@@ -182,28 +186,193 @@ export class GatewayServer extends EventEmitter {
   }
 
   /**
-   * 处理消息请求
+   * 解析 URL 查询参数
+   */
+  private parseQueryParams(url: string): Record<string, string> {
+    const queryStart = url.indexOf('?');
+    if (queryStart === -1) return {};
+    const query = url.slice(queryStart + 1);
+    const params: Record<string, string> = {};
+    query.split('&').forEach(pair => {
+      const [key, value] = pair.split('=');
+      params[decodeURIComponent(key)] = decodeURIComponent(value || '');
+    });
+    return params;
+  }
+
+  /**
+   * 处理消息请求 - 支持 SSE 流式输出，实时推送工具执行事件
+   *
+   * 事件格式:
+   * - event: llm_start - 大模型开始推理
+   * - event: llm_end - 大模型推理完成，返回结果
+   * - event: tool_call - 大模型决定调用工具
+   * - event: tool_start - 工具开始执行
+   * - event: tool_end - 工具执行完成
+   * - event: final - 最终回答完成
    */
   private async handleMessage(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      // 解析请求体
-      const body = await this.parseRequestBody(req);
-      const request: Request = JSON.parse(body);
+      let request: { sessionId: string; channelId: string; message: { content: string } };
+
+      if (req.method === 'GET') {
+        // GET 请求用于 SSE，参数在查询字符串
+        const params = this.parseQueryParams(req.url!);
+        request = {
+          sessionId: params.sessionId || 'unknown',
+          channelId: params.channelId || 'webchat',
+          message: { content: params.content || '' },
+        };
+      } else {
+        // POST 请求
+        const body = await this.parseRequestBody(req);
+        const parsed = JSON.parse(body);
+        request = {
+          sessionId: parsed.sessionId,
+          channelId: parsed.channelId,
+          message: parsed.message,
+        };
+      }
 
       console.log(`[Gateway] 处理消息请求: ${request.sessionId}`);
 
       // 获取或创建会话
       const session = await this.getOrCreateSession(request.sessionId, request.channelId);
 
-      // 处理消息
-      const response = await this.processMessage(session, request);
+      // 设置 SSE 响应头
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
 
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(response));
+      // 包装 send 事件
+      const sendEvent = (event: string, data: unknown) => {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      // 调用 Agent 处理，同时监听工具执行事件
+      if (this.defaultAgent && this.defaultAgent.isConnected()) {
+        const overallStartTime = Date.now();
+        let round = 0;
+
+        // 1. Monkey patch 捕获 callLLM 来获取 LLM 调用事件
+        const originalCallLLM = (this.defaultAgent as any).callLLM;
+        const originalExecuteToolCall = (this.defaultAgent as any).executeToolCall;
+
+        if (originalCallLLM) {
+          (this.defaultAgent as any).callLLM = async (systemContext: string, message: any) => {
+            const llmStartTime = Date.now();
+            // 发送 LLM 开始事件
+            sendEvent('llm_start', {
+              round: round + 1,
+              timestamp: llmStartTime,
+              model: (this.defaultAgent as any).getCurrentModel(),
+            });
+            console.log(`[Gateway] 第 ${round + 1} 轮: LLM 开始推理`);
+
+            // 调用原始方法
+            const response = await originalCallLLM.call(this.defaultAgent, systemContext, message);
+
+            const llmEndTime = Date.now();
+            // 发送 LLM 结束事件
+            sendEvent('llm_end', {
+              round: round + 1,
+              durationMs: llmEndTime - llmStartTime,
+              hasToolCalls: response.toolCalls && response.toolCalls.length > 0,
+              content: response.content,
+              toolCalls: response.toolCalls || [],
+              timestamp: llmEndTime,
+            });
+            console.log(`[Gateway] 第 ${round + 1} 轮: LLM 推理完成，工具调用=${!!(response.toolCalls && response.toolCalls.length)}`);
+
+            // 如果有工具调用，逐个发送事件
+            if (response.toolCalls && response.toolCalls.length > 0) {
+              for (const toolCall of response.toolCalls) {
+                sendEvent('tool_call', {
+                  round: round + 1,
+                  name: toolCall.name,
+                  arguments: toolCall.arguments,
+                  callId: toolCall.callId,
+                  timestamp: llmEndTime,
+                });
+              }
+            }
+
+            round++;
+            return response;
+          };
+        }
+
+        // 2. Monkey patch 捕获工具执行
+        if (originalExecuteToolCall) {
+          (this.defaultAgent as any).executeToolCall = async (toolCall: any) => {
+            // 发送工具开始事件
+            sendEvent('tool_start', {
+              round,
+              name: toolCall.name,
+              arguments: toolCall.arguments,
+              timestamp: Date.now(),
+            });
+            console.log(`[Gateway] 工具开始执行: ${toolCall.name}`);
+
+            // 执行原始方法
+            const result = await originalExecuteToolCall.call(this.defaultAgent, toolCall);
+
+            // 发送工具结束事件
+            sendEvent('tool_end', {
+              round,
+              name: toolCall.name,
+              result,
+              durationMs: Date.now() - overallStartTime,
+              timestamp: Date.now(),
+            });
+            console.log(`[Gateway] 工具执行完成: ${toolCall.name}, success=${result.success}`);
+
+            return result;
+          };
+        }
+
+        // 执行 Agent 处理，获取最终响应
+        const agentResponse = await this.defaultAgent.processMessage({
+          id: `msg_${Date.now()}`,
+          role: MessageRole.USER,
+          content: request.message.content,
+          timestamp: Date.now(),
+        });
+
+        // 发送最终响应
+        const response: Response = {
+          sessionId: session.id,
+          messageId: agentResponse.id,
+          content: agentResponse.content,
+          timestamp: Date.now(),
+          data: {
+            totalDurationMs: Date.now() - overallStartTime,
+          },
+        };
+
+        sendEvent('final', response);
+        res.end();
+
+        // 恢复原始方法
+        if (originalCallLLM) {
+          (this.defaultAgent as any).callLLM = originalCallLLM;
+        }
+        if (originalExecuteToolCall) {
+          (this.defaultAgent as any).executeToolCall = originalExecuteToolCall;
+        }
+      } else {
+        sendEvent('error', { error: '没有可用的 Agent' });
+        res.end();
+      }
     } catch (error) {
       console.error('[Gateway] 处理消息失败:', error);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: '处理消息失败' }));
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: '处理消息失败' }));
+      }
     }
   }
 

@@ -56,6 +56,10 @@ export interface ModelProviderConfig {
   api: string;
   /** 该提供者下的模型列表 */
   models: ModelConfig[];
+  /** 失败重试等待时间（毫秒），默认 0，不等待直接重试 */
+  retryDelayMs?: number;
+  /** 最大重试次数，默认 1（总共最多请求 2 次：原始 + 1 次重试） */
+  maxRetries?: number;
 }
 
 /**

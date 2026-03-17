@@ -62,6 +62,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
     // 获取模型配置
     const modelConfig = this.getModel(modelId);
     const actualMaxTokens = maxTokens || modelConfig?.maxTokens || 4096;
+    const retryDelayMs = this.config.retryDelayMs ?? 0;
+    const maxRetries = this.config.maxRetries ?? 1;
 
     // 构建 OpenAI 请求体
     const body: Record<string, unknown> = {
@@ -85,31 +87,61 @@ export class OpenAICompatibleProvider implements ModelProvider {
     console.log(`[OpenAIProvider] 调用模型: ${model}, 端点: ${endpoint}`);
     console.log(`[OpenAIProvider] apiKey: ${this.config.apiKey.slice(0, 8)}... (${this.config.apiKey.length} chars)`);
     console.log(`[OpenAIProvider] api type: ${this.config.api}, baseUrl: ${this.config.baseUrl}`);
+    console.log(`[OpenAIProvider] 重试配置: maxRetries=${maxRetries}, retryDelayMs=${retryDelayMs}`);
     console.log(`[OpenAIProvider] 请求参数: ${JSON.stringify(body, null, 2)}`);
 
-    // 发送请求
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    // 带重试的请求循环
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0 && retryDelayMs > 0) {
+        console.log(`[OpenAIProvider] 第 ${attempt} 次重试，等待 ${retryDelayMs}ms...`);
+        await this.sleep(retryDelayMs);
+      }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`[OpenAIProvider] 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
+      try {
+        // 发送请求
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.config.apiKey}`,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`[OpenAIProvider] 请求失败: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        // 处理流式响应
+        if (stream && response.body) {
+          return this.handleStreamingResponse(response, onChunk);
+        }
+
+        // 处理非流式响应
+        const data = await response.json() as OpenAIResponse;
+        return this.transformResponse(data, model);
+      } catch (error) {
+        lastError = error as Error;
+        console.log(`[OpenAIProvider] 第 ${attempt + 1} 次尝试失败: ${lastError.message}`);
+        if (attempt >= maxRetries) {
+          // 已达到最大重试次数，抛出错误
+          throw lastError;
+        }
+        // 否则继续重试
+      }
     }
 
-    // 处理流式响应
-    if (stream && response.body) {
-      return this.handleStreamingResponse(response, onChunk);
-    }
+    // 理论上不会走到这里
+    throw lastError!;
+  }
 
-    // 处理非流式响应
-    const data = await response.json() as OpenAIResponse;
-    return this.transformResponse(data, model);
+  /**
+   * 休眠等待
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
