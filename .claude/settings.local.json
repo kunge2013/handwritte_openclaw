@@ -7,7 +7,20 @@
       "Bash(npm run doctor)",
       "Bash(npm run start:*)",
       "Bash(netstat -ano)",
-      "Bash(findstr :3000)"
+      "Bash(findstr :3000)",
+      "Bash(dir \"d:\\\\github.io\\\\openclaw_study\\\\*.json\" /b)",
+      "Bash(ls d:github.ioopenclaw_study/*.json)",
+      "Bash(findstr .json)",
+      "Bash(node dist/cli/cli.js status)",
+      "Bash(node dist/cli/cli.js config show)",
+      "Bash(timeout 15 node dist/cli/cli.js start)",
+      "Read(//d/github.io/openclaw/src/**)",
+      "Read(//d/github.io/openclaw/src/agents/**)",
+      "Bash(node -e \"console.log\\(process.argv[1]\\); console.log\\(''Current baseUrl from config:'', ''https://ark.cn-beijing.volces.com/api/coding/v3''\\); console.log\\(''What we get:'', new URL\\('''', ''https://ark.cn-beijing.volces.com/api/coding/v3''\\).toString\\(\\)\\)\")",
+      "Bash(curl -X POST \"https://ark.cn-beijing.volces.com/api/coding/v3\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{:*)",
+      "Bash(curl -v -X POST \"https://ark.cn-beijing.volces.com/api/coding/v3\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{:*)",
+      "Bash(curl -X POST \"https://ark.cn-beijing.volces.com/api/coding\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{\"\"model\"\": \"\"minimax-m2.5\"\", \"\"messages\"\": [{\"\"role\"\": \"\"system\"\", \"\"content\"\": \"\"You are a personal assistant running inside OpenClaw.\"\"}, {\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"2121\"\"}], \"\"temperature\"\": 0.7, \"\"max_tokens\"\": 128000, \"\"stream\"\": false, \"\"tools\"\": [{\"\"type\"\": \"\"function\"\", \"\"function\"\": {\"\"name\"\": \"\"ping\"\", \"\"description\"\": \"\"检查代理状态\"\", \"\"parameters\"\": {}}}, {\"\"type\"\": \"\"function\"\", \"\"function\"\": {\"\"name\"\": \"\"get_context\"\", \"\"description\"\": \"\"获取当前对话上下文\"\", \"\"parameters\"\": {}}}], \"\"tool_choice\"\": \"\"auto\"\"}')",
+      "Bash(curl -v -X POST \"https://ark.cn-beijing.volces.com/api/v3/chat/completions\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer ac0b51e5-19e7-4459-9fd8-e92b47717911\" -d '{\"\"model\"\": \"\"minimax-m2.5\"\", \"\"messages\"\": [{\"\"role\"\": \"\"system\"\", \"\"content\"\": \"\"Hello\"\"}, {\"\"role\"\": \"\"user\"\", \"\"content\"\": \"\"Hi\"\"}], \"\"temperature\"\": 0.7, \"\"max_tokens\"\": 1000, \"\"stream\"\": false}')"
     ]
   }
 }

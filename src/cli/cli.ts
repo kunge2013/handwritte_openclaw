@@ -21,13 +21,15 @@
  * - version: 显示版本
  */
 
-import { ConfigManager } from '../config/config.js';
-import { EnvLoader } from '../config/config.js';
+import { ConfigManager, EnvLoader, ConfigPathResolver } from '../config/config.js';
 import type { Config } from '../config/types.js';
 import { SecretsManager } from '../secrets/secrets.js';
 import { AgentManager } from '../agents/agent.js';
+import type { AgentConfig } from '../agents/types.js';
+import { ModelManager } from '../models/model-manager.js';
 import { GatewayManager } from '../gateway/server.js';
 import { ChannelManager, ChannelFactory } from '../channels/channel.js';
+import { ChannelType } from '../channels/types.js';
 import { MemoryManager } from '../memory/memory.js';
 import { PluginManager } from '../plugins/plugin.js';
 import type { Command, CommandOptions } from './types.js';
@@ -38,6 +40,7 @@ import type { Command, CommandOptions } from './types.js';
 export class CLIApplication {
   private configManager: ConfigManager;
   private secretsManager: SecretsManager;
+  private modelManager: ModelManager;
   private agentManager: AgentManager;
   private gatewayManager: GatewayManager;
   private channelManager: ChannelManager;
@@ -45,11 +48,16 @@ export class CLIApplication {
   private pluginManager: PluginManager;
   private commands: Map<string, Command> = new Map();
 
-  constructor() {
+  constructor(configPath?: string) {
+    // 解析配置文件路径
+    const resolvedPath = ConfigPathResolver.resolve(configPath);
+    console.log(`[CLI] 配置文件路径: ${resolvedPath}`);
+
     // 初始化各模块
-    this.configManager = new ConfigManager();
+    this.configManager = new ConfigManager(resolvedPath);
     this.secretsManager = new SecretsManager();
-    this.agentManager = new AgentManager();
+    this.modelManager = new ModelManager();
+    this.agentManager = new AgentManager(this.modelManager);
     this.gatewayManager = new GatewayManager();
     this.channelManager = new ChannelManager();
     this.memoryManager = new MemoryManager({
@@ -126,7 +134,7 @@ export class CLIApplication {
    * 运行命令
    */
   async run(args: string[]): Promise<void> {
-    const [commandName, ...commandArgs] = args;
+    let [commandName, ...commandArgs] = args;
 
     if (!commandName) {
       await this.handleHelp();
@@ -140,6 +148,22 @@ export class CLIApplication {
       await this.handleHelp();
       process.exit(1);
       return;
+    }
+
+    // 处理子命令
+    if (command.subcommands && command.subcommands.length > 0 && commandArgs.length > 0) {
+      const subcommandName = commandArgs[0];
+      const subcommand = command.subcommands.find(s => s.name === subcommandName);
+      if (subcommand && subcommand.handler) {
+        console.log(`[CLI] 执行命令: ${commandName} ${subcommandName}`);
+        try {
+          await subcommand.handler(commandArgs.slice(1));
+          return;
+        } catch (error) {
+          console.error(`[CLI] 子命令执行失败:`, error);
+          process.exit(1);
+        }
+      }
     }
 
     console.log(`[CLI] 执行命令: ${commandName}`);
@@ -173,11 +197,31 @@ export class CLIApplication {
     this.secretsManager.loadFromEnv('openai_key', 'OPENAI_API_KEY');
     this.secretsManager.loadFromEnv('anthropic_key', 'ANTHROPIC_API_KEY');
 
+    // 加载模型提供者配置
+    if (config.models?.providers) {
+      console.log(`[CLI] 发现模型配置，提供者: ${Object.keys(config.models.providers)}`);
+      this.modelManager.loadFromConfig(config.models);
+    } else {
+      console.warn('[CLI] 未找到模型配置');
+    }
+
     // 初始化记忆系统
     await this.memoryManager.initialize();
 
+    // 获取第一个 Agent 配置
+    let agentConfig: AgentConfig = config.agent || {
+      id: 'default',
+      model: 'volcengine-plan/ark-code-latest',
+    };
+    if (config.agents && Array.isArray((config.agents as any).list) && (config.agents as any).list.length > 0) {
+      // 从 agents.list 取第一个
+      agentConfig = (config.agents as any).list[0] as AgentConfig;
+      // 如果 model 是 "provider/model" 格式，直接使用
+      console.log(`[CLI] 使用 Agent 配置: ${agentConfig.id}, 模型: ${agentConfig.model}`);
+    }
+
     // 创建 Agent
-    const agent = await this.agentManager.createAgent(config.agent);
+    const agent = await this.agentManager.createAgent(agentConfig);
 
     // 监听 agent-message 事件并打印日志
     this.agentManager.on('agent-message', (data) => {
@@ -185,16 +229,26 @@ export class CLIApplication {
     });
 
     // 启动 Gateway
-    const server = await this.gatewayManager.startServer(config.gateway);
+    const server = await this.gatewayManager.startServer(config.gateway || { port: 3000 });
 
     // 设置默认 Agent
     server.setDefaultAgent(agent);
 
-    // 注册渠道
-    for (const channelConfig of config.channels) {
-      if (channelConfig.enabled !== false) {
-        const channel = ChannelFactory.create(channelConfig);
-        await this.channelManager.registerChannel(channel);
+    // 注册渠道（跳过不支持的渠道类型，简化学习版只支持 web/telegram/whatsapp/slack）
+    if (config.channels && typeof config.channels === 'object') {
+      for (const [channelType, channelConfig] of Object.entries(config.channels)) {
+        if ((channelConfig as any).enabled !== false) {
+          try {
+            const channel = ChannelFactory.create({
+              ...(channelConfig as object),
+              type: channelType as unknown as ChannelType,
+              id: channelType,
+            });
+            await this.channelManager.registerChannel(channel);
+          } catch (error) {
+            console.warn(`[CLI] 跳过不支持的渠道 ${channelType}:`, (error as Error).message);
+          }
+        }
       }
     }
 
@@ -356,7 +410,17 @@ export class CLIApplication {
  */
 export async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const cli = new CLIApplication();
+
+  // 检查 --config 参数
+  let configPath: string | undefined;
+  const configArgIndex = args.indexOf('--config');
+  if (configArgIndex !== -1 && configArgIndex + 1 < args.length) {
+    configPath = args[configArgIndex + 1];
+    // 从参数列表移除 --config 和路径
+    args.splice(configArgIndex, 2);
+  }
+
+  const cli = new CLIApplication(configPath);
 
   await cli.run(args);
 }

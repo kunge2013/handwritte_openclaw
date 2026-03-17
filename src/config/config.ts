@@ -19,10 +19,10 @@
  * }
  */
 
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import type { Config, ConfigValidationResult } from './types.js';
-import { ChannelType } from '../channels/types.js';
 
 /**
  * 配置管理器
@@ -43,7 +43,7 @@ export class ConfigManager {
     console.log(`[Config] 加载配置文件: ${this.configPath}`);
 
     try {
-      const content = await fs.readFile(this.configPath, 'utf-8');
+      const content = await fsPromises.readFile(this.configPath, 'utf-8');
       const parsed = JSON.parse(content);
 
       // 验证配置
@@ -76,7 +76,7 @@ export class ConfigManager {
     }
 
     console.log(`[Config] 保存配置文件: ${this.configPath}`);
-    await fs.writeFile(
+    await fsPromises.writeFile(
       this.configPath,
       JSON.stringify(this.config, null, 2),
       'utf-8',
@@ -192,14 +192,7 @@ export class ConfigManager {
         maxConnections: 1000,
         sessionTimeout: 3600000, // 1小时
       },
-      channels: [
-        {
-          id: 'telegram-main',
-          type: ChannelType.TELEGRAM,
-          enabled: true,
-          commandPrefix: '/',
-        },
-      ],
+      channels: {},
       memory: {
         maxEntries: 10000,
         enableEmbeddings: true,
@@ -241,11 +234,8 @@ export class ConfigPathResolver {
 
     for (const p of defaultPaths) {
       const fullPath = path.resolve(process.cwd(), p);
-      // 简化检查（实际项目中应该用 fs.access）
-      try {
+      if (fs.existsSync(fullPath)) {
         return fullPath;
-      } catch {
-        continue;
       }
     }
 
@@ -265,7 +255,7 @@ export class EnvLoader {
     const filePath = envPath || path.join(process.cwd(), '.env');
 
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
+      const content = await fsPromises.readFile(filePath, 'utf-8');
       const lines = content.split('\n');
 
       for (const line of lines) {
