@@ -13,7 +13,7 @@
     "providers": {
       "volcengine-plan": {
         "baseUrl": "https://www.fucheers.top/v1/chat/completions",
-        "apiKey": "sk-Gj7XGwc1zmqWCpSObruYAWH0I0Gk0TlGUxF3liFeDGh8kKGx",
+        "apiKey": "sk-",
         "api": "openai-completions",
         "models": [
           
@@ -137,14 +137,14 @@
       "domain": "feishu",
       "accounts": {
         "default": {
-          "appId": "cli_a9f47ae148389bd9",
-          "appSecret": "6LowX8DlnYSNEoeyaJakrhTiqDLNjCG2",
+          "appId": "",
+          "appSecret": "",
           "botName": "主助手",
           "requireMention": true
         },
         "coding": {
-          "appId": "cli_a93d2e12ccb85bd8",
-          "appSecret": "RPEhXdBKMdI4OIJkdlPJqg7XciU2ESII",
+          "appId": "",
+          "appSecret": "",
           "botName": "coding",
           "requireMention": false
         }
