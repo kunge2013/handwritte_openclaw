@@ -55,6 +55,8 @@ export interface BuildAgentSystemPromptOptions {
   acpEnabled?: boolean;
   /** 注入的上下文文件内容 */
   contextFiles?: Array<{ path: string; content: string }>;
+  /** 技能系统提示词（来自 Skills 系统） */
+  skillsPrompt?: string;
 }
 
 /**
@@ -171,7 +173,13 @@ export function buildAgentSystemPrompt(options: BuildAgentSystemPromptOptions): 
     }
   }
 
-  // 12. Extra System Prompt (always added at the end if provided)
+  // 12. Skills - 可用技能列表（来自技能系统）
+  if (options.skillsPrompt && options.skillsPrompt.trim()) {
+    sections.push('\n');
+    sections.push(options.skillsPrompt.trim());
+  }
+
+  // 13. Extra System Prompt (always added at the end if provided)
   if (options.extraSystemPrompt) {
     sections.push(`\n${options.extraSystemPrompt}`);
   }

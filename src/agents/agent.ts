@@ -8,13 +8,19 @@
  * 3. 调用 LLM 模型生成响应
  * 4. 执行工具调用
  * 5. 管理会话状态
+ * 6. 集成 Skills 系统 - 动态加载可扩展技能
  */
 
 import { EventEmitter } from 'events';
 import { MessageRole } from './types.js';
 import { buildAgentSystemPrompt } from './system-prompt.js';
+import {
+  buildWorkspaceSkillSnapshot,
+  resolveSkillsPromptForRun,
+} from './skills/index.js';
 import type { ModelManager } from '../models/model-manager.js';
-import type { Message, Tool, AgentConfig } from './types.js';
+import type { Message, Tool, AgentConfig, SkillsSystemState } from './types.js';
+import type { SkillSnapshot } from './skills/types.js';
 import type { CompletionOptions, ChatMessage } from '../models/types.js';
 import type { BuildAgentSystemPromptOptions } from './system-prompt.js';
 
@@ -39,6 +45,7 @@ export class Agent extends EventEmitter {
   private messageHistory: Message[] = [];
   private tools: Map<string, Tool> = new Map();
   private connected: boolean = false;
+  private skills: SkillsSystemState;
 
   constructor(config: AgentConfig, modelManager: ModelManager) {
     super();
@@ -46,6 +53,16 @@ export class Agent extends EventEmitter {
     this.modelManager = modelManager;
     // 默认使用配置中的 model，如果没有使用 default/default
     this.modelRef = config.model || 'default/default';
+
+    // 初始化技能系统状态
+    this.skills = {
+      enabled: config.skills?.enabled ?? true,
+      snapshot: undefined,
+      commandSpecs: [],
+      loadedCount: 0,
+      eligibleCount: 0,
+      lastUpdated: undefined,
+    };
 
     // 注册默认工具
     this.registerTool({
@@ -66,14 +83,81 @@ export class Agent extends EventEmitter {
 
   /**
    * 连接到 Agent 服务
+   *
+   * 如果技能系统启用，会在连接时预构建技能快照
    */
   async connect(): Promise<void> {
     console.log('[Agent] 正在连接...', this.config.id);
     // 模拟连接过程
     await new Promise(resolve => setTimeout(resolve, 100));
+
+    // 如果技能系统启用，预构建技能快照
+    if (this.skills.enabled) {
+      this.initializeSkillsSnapshot();
+    }
+
     this.connected = true;
     this.emit('connected', { agentId: this.config.id });
-    console.log('[Agent] 连接成功');
+    console.log('[Agent] 连接成功' + (this.skills.enabled ? `, 加载 ${this.skills.loadedCount} 技能, ${this.skills.eligibleCount} 就绪` : ''));
+  }
+
+  /**
+   * 初始化技能快照
+   *
+   * 从当前工作目录加载并构建技能快照，缓存起来供后续调用
+   * 这是一个同步操作，因为只需要在初始化执行一次
+   */
+  private initializeSkillsSnapshot(): void {
+    const workspaceDir = process.cwd();
+    const skillFilter = this.config.skills?.filter;
+
+    // 构建技能快照，包含过滤后的可用技能列表
+    const snapshot: SkillSnapshot = buildWorkspaceSkillSnapshot(workspaceDir, {
+      config: this.config as any,
+      skillFilter,
+      snapshotVersion: Date.now(),
+    });
+
+    // 更新状态
+    this.skills.snapshot = snapshot;
+    this.skills.loadedCount = snapshot.skills?.length ?? 0;
+    this.skills.eligibleCount = snapshot.resolvedSkills?.length ?? 0;
+    this.skills.lastUpdated = Date.now();
+
+    this.emit('skill-loaded', {
+      agentId: this.config.id,
+      loadedCount: this.skills.loadedCount,
+      eligibleCount: this.skills.eligibleCount,
+      timestamp: this.skills.lastUpdated,
+    });
+  }
+
+  /**
+   * 获取当前技能快照
+   * @returns 技能快照（如果技能系统启用）
+   */
+  getSkillsSnapshot(): SkillSnapshot | undefined {
+    return this.skills.snapshot;
+  }
+
+  /**
+   * 刷新技能快照
+   *
+   * 重新加载技能目录并重建快照，用于添加新技能后刷新
+   */
+  refreshSkills(): void {
+    if (this.skills.enabled) {
+      this.initializeSkillsSnapshot();
+      console.log('[Agent] 技能快照已刷新', `加载 ${this.skills.loadedCount}, 就绪 ${this.skills.eligibleCount}`);
+    }
+  }
+
+  /**
+   * 检查技能系统是否启用
+   * @returns 是否启用
+   */
+  isSkillsEnabled(): boolean {
+    return this.skills.enabled;
   }
 
   /**
@@ -243,15 +327,28 @@ export class Agent extends EventEmitter {
    * 包括：
    * - 系统提示词
    * - 可用工具信息
+   * - 可用技能列表（如果技能系统启用）
    * - 消息历史
    */
   private buildContext(): string {
+    // 获取技能提示词（如果技能系统启用且有快照）
+    let skillsPrompt: string | undefined;
+    if (this.skills.enabled && this.skills.snapshot) {
+      const workspaceDir = process.cwd();
+      skillsPrompt = resolveSkillsPromptForRun({
+        skillsSnapshot: this.skills.snapshot,
+        workspaceDir,
+        config: this.config as any,
+      });
+    }
+
     // 使用新的模块化提示词构建器
     const options: BuildAgentSystemPromptOptions = {
       mode: 'full',
       tools: Array.from(this.tools.values()),
       extraSystemPrompt: this.config.systemPrompt,
       reasoningTagHint: true,
+      skillsPrompt,
       runtimeInfo: {
         agentId: this.config.id,
         host: 'local',
