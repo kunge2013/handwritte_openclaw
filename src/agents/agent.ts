@@ -12,17 +12,36 @@
  */
 
 import { EventEmitter } from 'events';
+import fs from 'node:fs';
 import { MessageRole } from './types.js';
 import { buildAgentSystemPrompt } from './system-prompt.js';
 import {
   buildWorkspaceSkillSnapshot,
   resolveSkillsPromptForRun,
+  buildWorkspaceSkillCommandSpecs,
 } from './skills/index.js';
 import type { ModelManager } from '../models/model-manager.js';
 import type { Message, Tool, AgentConfig, SkillsSystemState } from './types.js';
-import type { SkillSnapshot } from './skills/types.js';
+import type { SkillSnapshot, SkillCommandSpec, Skill } from './skills/types.js';
+import type { SkillCommandDispatchSpec } from './skills/types.js';
 import type { CompletionOptions, ChatMessage } from '../models/types.js';
 import type { BuildAgentSystemPromptOptions } from './system-prompt.js';
+
+/**
+ * 技能调用结果
+ */
+export interface SkillInvokeResult {
+  /** 是否成功找到技能 */
+  found: boolean;
+  /** 是否有分发配置 */
+  hasDispatch: boolean;
+  /** 分发的工具名称（如果有） */
+  toolName?: string;
+  /** 技能完整正文（如果没有分发） */
+  content?: string;
+  /** 错误信息（如果失败） */
+  error?: string;
+}
 
 /**
  * Agent 类 - 核心代理实现
@@ -118,8 +137,16 @@ export class Agent extends EventEmitter {
       snapshotVersion: Date.now(),
     });
 
+    // 构建技能命令规范（用于 slash 命令调用）
+    const commandSpecs: SkillCommandSpec[] = buildWorkspaceSkillCommandSpecs(workspaceDir, {
+      config: this.config as any,
+      skillFilter,
+      reservedNames: new Set(Array.from(this.tools.keys())),
+    });
+
     // 更新状态
     this.skills.snapshot = snapshot;
+    this.skills.commandSpecs = commandSpecs;
     this.skills.loadedCount = snapshot.skills?.length ?? 0;
     this.skills.eligibleCount = snapshot.resolvedSkills?.length ?? 0;
     this.skills.lastUpdated = Date.now();
@@ -128,6 +155,7 @@ export class Agent extends EventEmitter {
       agentId: this.config.id,
       loadedCount: this.skills.loadedCount,
       eligibleCount: this.skills.eligibleCount,
+      commandCount: this.skills.commandSpecs.length,
       timestamp: this.skills.lastUpdated,
     });
   }
@@ -475,6 +503,121 @@ export class Agent extends EventEmitter {
    */
   getCurrentModel(): string {
     return this.modelRef;
+  }
+
+  /**
+   * 获取所有可用技能命令规范
+   * @returns 技能命令规范列表
+   */
+  getSkillCommandSpecs(): SkillCommandSpec[] {
+    return this.skills.commandSpecs;
+  }
+
+  /**
+   * 按命令名称查找技能命令规范
+   * @param commandName - 命令名称（经过 slug 化）
+   * @returns 技能命令规范，如果没找到返回 undefined
+   */
+  findSkillCommand(commandName: string): SkillCommandSpec | undefined {
+    return this.skills.commandSpecs.find(
+      spec => spec.name.toLowerCase() === commandName.toLowerCase()
+    );
+  }
+
+  /**
+   * 按技能名称查找完整技能信息
+   * @param skillName - 技能名称
+   * @returns 技能定义，如果没找到返回 undefined
+   */
+  findSkillByName(skillName: string): Skill | undefined {
+    return this.skills.snapshot?.resolvedSkills?.find(
+      skill => skill.name.toLowerCase() === skillName.toLowerCase()
+    );
+  }
+
+  /**
+   * 加载技能完整内容（SKILL.md 正文）
+   * 渐进式披露：只在调用时才加载完整正文
+   * @param skill - 技能定义
+   * @returns 技能完整内容，包含前置元数据和正文
+   */
+  loadSkillFullContent(skill: Skill): { frontmatter: string; content: string } {
+    const fullContent = fs.readFileSync(skill.filePath, 'utf-8');
+
+    // 提取前置元数据块和正文
+    const frontmatterRegex = /^---\s*\n([\s\S]*?)\n---/;
+    const match = fullContent.match(frontmatterRegex);
+
+    if (match) {
+      return {
+        frontmatter: match[0],
+        content: fullContent.slice(match[0].length).trim(),
+      };
+    }
+
+    return {
+      frontmatter: '',
+      content: fullContent.trim(),
+    };
+  }
+
+  /**
+   * 调用技能
+   * 根据技能的分发配置，要么分发到对应工具，要么返回完整正文供模型处理
+   * @param commandName - 命令名称（从 slash 解析）
+   * @returns 调用结果
+   */
+  invokeSkill(commandName: string): SkillInvokeResult {
+    // 1. 查找技能命令
+    const commandSpec = this.findSkillCommand(commandName);
+    if (!commandSpec) {
+      return {
+        found: false,
+        hasDispatch: false,
+        error: `Skill command not found: ${commandName}`,
+      };
+    }
+
+    // 2. 如果有分发配置，返回分发信息给调用者执行
+    if (commandSpec.dispatch) {
+      return {
+        found: true,
+        hasDispatch: true,
+        toolName: commandSpec.dispatch.toolName,
+      };
+    }
+
+    // 3. 没有分发配置，加载完整技能正文返回
+    const skill = this.findSkillByName(commandSpec.skillName);
+    if (!skill) {
+      return {
+        found: false,
+        hasDispatch: false,
+        error: `Skill definition not found: ${commandSpec.skillName}`,
+      };
+    }
+
+    const { content } = this.loadSkillFullContent(skill);
+    return {
+      found: true,
+      hasDispatch: false,
+      content,
+    };
+  }
+
+  /**
+   * 检查技能是否需要模型调用
+   * 根据调用策略判断模型是否可以看到并调用这个技能
+   * @param skillName - 技能名称
+   * @returns 是否允许模型调用
+   */
+  isSkillModelInvocable(skillName: string): boolean {
+    // 在技能加载阶段已经过滤了 disableModelInvocation 的技能
+    // 所以只要出现在 resolvedSkills 中就是允许的
+    const found = this.skills.snapshot?.resolvedSkills?.some(
+      s => s.name === skillName
+    );
+    return Boolean(found);
   }
 }
 
