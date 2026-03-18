@@ -12,6 +12,8 @@
  * 7. 包装钩子
  */
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { Tool } from './types.js';
 
 /**
@@ -41,9 +43,13 @@ export function createOpenClawCodingTools(policy?: ToolPolicy): Tool[] {
       name: 'read',
       description: 'Read the contents of a file',
       handler: async (args: Record<string, unknown>) => {
-        const path = args.path as string;
-        // 实际实现会读取文件，这里是简化学习版
-        return { path, content: '[Content would be read here]' };
+        const filePath = args.path as string;
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          return { path: filePath, content, bytes: content.length };
+        } catch (error) {
+          return { path: filePath, error: String(error), found: false };
+        }
       },
       parameters: {
         type: 'object',
@@ -57,10 +63,17 @@ export function createOpenClawCodingTools(policy?: ToolPolicy): Tool[] {
       name: 'write',
       description: 'Write content to a file',
       handler: async (args: Record<string, unknown>) => {
-        const path = args.path as string;
+        const filePath = args.path as string;
         const content = args.content as string;
-        // 实际实现会写入文件
-        return { path, bytes: content.length };
+        try {
+          // 确保父目录存在
+          await fs.mkdir(path.dirname(path.resolve(filePath)), { recursive: true });
+          // 写入文件
+          await fs.writeFile(filePath, content, 'utf-8');
+          return { path: filePath, bytes: content.length, ok: true };
+        } catch (error) {
+          return { path: filePath, error: String(error), ok: false };
+        }
       },
       parameters: {
         type: 'object',
@@ -75,14 +88,22 @@ export function createOpenClawCodingTools(policy?: ToolPolicy): Tool[] {
       name: 'ls',
       description: 'List files in a directory',
       handler: async (args: Record<string, unknown>) => {
-        const path = args.path as string;
-        // 实际实现会列出目录
-        return { path, files: [] };
+        const dirPath = args.path as string || '.';
+        try {
+          const entries = await fs.readdir(dirPath, { withFileTypes: true });
+          const files = entries.map(entry => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+          }));
+          return { path: dirPath, files, count: files.length, ok: true };
+        } catch (error) {
+          return { path: dirPath, error: String(error), ok: false, files: [] };
+        }
       },
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Directory path' },
+          path: { type: 'string', description: 'Directory path, defaults to current directory' },
         },
       },
     },
