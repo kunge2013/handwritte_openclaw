@@ -222,7 +222,7 @@ export class Agent extends EventEmitter {
     this.messageHistory.push(message);
 
     let finalResponse: Message | null = null;
-    const MAX_TOOL_ROUNDS = 5; // 限制最大工具调用轮次，防止无限循环
+    const MAX_TOOL_ROUNDS = 10; // 限制最大工具调用轮次，防止无限循环
 
     // ReAct 工具调用循环
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
